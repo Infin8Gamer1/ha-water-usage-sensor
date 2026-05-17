@@ -1,16 +1,29 @@
-"""Test the SmartHub Coop Energy config flow."""
-from unittest.mock import AsyncMock, patch
+"""Test the Municipal Water Usage config flow."""
+from unittest.mock import patch
 
-import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.smarthub.const import DOMAIN
-from custom_components.smarthub.exceptions import SmartHubAuthenticationError, SmartHubConnectionError
+from custom_components.municipal_water_usage.const import DOMAIN
+from custom_components.municipal_water_usage.exceptions import (
+    WaterUsageAuthenticationError,
+    WaterUsageConnectionError,
+)
+
+
+SAMPLE_INPUT = {
+    "email": "test@example.com",
+    "password": "test-password",
+    "account_id": "12345",
+    "host": "bastroptx.municipalonlinepayments.com",
+    "timezone": "America/Chicago",
+    "poll_interval": 360,
+}
+
 
 async def test_form(hass: HomeAssistant) -> None:
-    """Test we get the form."""
+    """Test we get the form and create an entry on success."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -18,38 +31,24 @@ async def test_form(hass: HomeAssistant) -> None:
     assert result["errors"] == {}
 
     with patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.get_token",
-        return_value="test-token",
-    ), patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.close",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.async_login",
         return_value=None,
     ), patch(
-        "custom_components.smarthub.async_setup_entry",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.close",
+        return_value=None,
+    ), patch(
+        "custom_components.municipal_water_usage.async_setup_entry",
         return_value=True,
     ) as mock_setup_entry:
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                "email": "test@example.com",
-                "password": "test-password",
-                "account_id": "12345",
-                "host": "test.smarthub.coop",
-                "timezone": "UTC",
-                "poll_interval": 360,
-            },
+            SAMPLE_INPUT,
         )
         await hass.async_block_till_done()
 
     assert result2["type"] == FlowResultType.CREATE_ENTRY
-    assert result2["title"] == "SmartHub"
-    assert result2["data"] == {
-        "email": "test@example.com",
-        "password": "test-password",
-        "account_id": "12345",
-        "host": "test.smarthub.coop",
-        "timezone": "UTC",
-        "poll_interval": 360,
-    }
+    assert result2["title"] == "Municipal Water Usage"
+    assert result2["data"] == SAMPLE_INPUT
     assert len(mock_setup_entry.mock_calls) == 1
 
 
@@ -60,22 +59,15 @@ async def test_form_invalid_auth(hass: HomeAssistant) -> None:
     )
 
     with patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.get_token",
-        side_effect=SmartHubAuthenticationError,
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.async_login",
+        side_effect=WaterUsageAuthenticationError,
     ), patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.close",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.close",
         return_value=None,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                "email": "test@example.com",
-                "password": "test-password",
-                "account_id": "12345",
-                "host": "test.smarthub.coop",
-                "timezone": "UTC",
-                "poll_interval": 360,
-            },
+            SAMPLE_INPUT,
         )
 
     assert result2["type"] == FlowResultType.FORM
@@ -89,22 +81,15 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
     )
 
     with patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.get_token",
-        side_effect=SmartHubConnectionError,
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.async_login",
+        side_effect=WaterUsageConnectionError,
     ), patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.close",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.close",
         return_value=None,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                "email": "test@example.com",
-                "password": "test-password",
-                "account_id": "12345",
-                "host": "test.smarthub.coop",
-                "timezone": "UTC",
-                "poll_interval": 360,
-            },
+            SAMPLE_INPUT,
         )
 
     assert result2["type"] == FlowResultType.FORM
@@ -112,28 +97,21 @@ async def test_form_cannot_connect(hass: HomeAssistant) -> None:
 
 
 async def test_form_unknown_exception(hass: HomeAssistant) -> None:
-    """Test we handle unknown exception."""
+    """Test we handle unknown exceptions."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
     with patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.get_token",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.async_login",
         side_effect=Exception,
     ), patch(
-        "custom_components.smarthub.config_flow.SmartHubAPI.close",
+        "custom_components.municipal_water_usage.config_flow.MunicipalWaterAPI.close",
         return_value=None,
     ):
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                "email": "test@example.com",
-                "password": "test-password",
-                "account_id": "12345",
-                "host": "test.smarthub.coop",
-                "timezone": "UTC",
-                "poll_interval": 360,
-            },
+            SAMPLE_INPUT,
         )
 
     assert result2["type"] == FlowResultType.FORM

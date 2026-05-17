@@ -1,0 +1,17 @@
+# Municipal Water Usage Integration Services
+
+refresh_data:
+  name: Refresh Water Usage Data
+  description: Manually refresh water usage data from the municipal portal
+  target:
+    entity:
+      domain: sensor
+      integration: municipal_water_usage
+
+refresh_authentication:
+  name: Refresh Authentication
+  description: Force re-login to the municipal water portal
+  target:
+    entity:
+      domain: sensor
+      integration: municipal_water_usage

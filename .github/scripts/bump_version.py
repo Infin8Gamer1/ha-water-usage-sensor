@@ -7,7 +7,7 @@ import re
 import argparse
 from typing import Optional
 
-MANIFEST_PATH = "custom_components/smarthub/manifest.json"
+MANIFEST_PATH = "custom_components/municipal_water_usage/manifest.json"
 
 def get_latest_tag() -> str:
     try:

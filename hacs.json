@@ -1,5 +1,5 @@
 {
-  "name": "SmartHub Coop Energy",
+  "name": "Municipal Water Usage",
   "render_readme": true,
   "homeassistant": "2024.1.0",
   "hacs": "1.34.0"

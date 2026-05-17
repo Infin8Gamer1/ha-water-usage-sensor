@@ -1,0 +1,33 @@
+{
+  "title": "Municipal Water Usage Integration",
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "email": "Email Address",
+          "password": "Password",
+          "account_id": "Account ID",
+          "host": "Portal Host",
+          "timezone": "Utility Timezone",
+          "poll_interval": "Poll Interval (minutes)"
+        },
+        "data_description": {
+          "email": "Email used to log in to the municipal payments portal",
+          "account_id": "Utility account number (visible on your bill)",
+          "host": "e.g. bastroptx.municipalonlinepayments.com",
+          "timezone": "Local timezone of the utility (used to align hourly readings)",
+          "poll_interval": "How often to fetch new readings (15-1440 minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the municipal water portal. Please check your host and network connection.",
+      "invalid_auth": "Invalid credentials. Please check your email and password.",
+      "invalid_input": "Invalid input provided. Please check all fields.",
+      "unknown": "Unexpected error occurred. Please check the logs."
+    },
+    "abort": {
+      "already_configured": "Municipal Water Usage integration is already configured for this account."
+    }
+  }
+}

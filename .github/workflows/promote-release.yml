@@ -52,7 +52,7 @@ jobs:
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/smarthub/manifest.json
+          git add custom_components/municipal_water_usage/manifest.json
           git commit -m "chore: promote to ${{ env.FINAL_VERSION }}"
           git push
 

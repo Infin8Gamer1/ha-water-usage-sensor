@@ -1,0 +1,18 @@
+{
+  "domain": "municipal_water_usage",
+  "name": "Municipal Water Usage",
+  "codeowners": [
+    "@jacobholyfield"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
+  "documentation": "https://github.com/jacobholyfield/ha-water-usage-sensor",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/jacobholyfield/ha-water-usage-sensor/issues",
+  "requirements": [
+    "aiohttp>=3.8.0"
+  ],
+  "version": "0.1.0"
+}

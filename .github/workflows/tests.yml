@@ -25,8 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest 'pytest-asyncio>=0.21' 'homeassistant>=2025.11' pytest-homeassistant-custom-component psutil-home-assistant fnv-hash-fast ulid-transform
           pip install -r requirements.txt || true
-          if [ -f custom_components/smarthub/manifest.json ]; then
-            pip install $(jq -r '.requirements[]' custom_components/smarthub/manifest.json)
+          if [ -f custom_components/municipal_water_usage/manifest.json ]; then
+            pip install $(jq -r '.requirements[]' custom_components/municipal_water_usage/manifest.json)
           fi
       - name: Run tests
         run: |
