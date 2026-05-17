@@ -31,7 +31,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -63,35 +62,6 @@ from .exceptions import (
 from .utils import sanitize_host
 
 _LOGGER = logging.getLogger(__name__)
-
-# #region agent log
-_DEBUG_LOG_PATH = Path(__file__).resolve().parent / "debug-52d3b8.log"
-_DEBUG_SESSION_ID = "52d3b8"
-
-
-def _agent_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: Dict[str, Any],
-) -> None:
-    """Append one NDJSON debug line (no secrets)."""
-    try:
-        payload = {
-            "sessionId": _DEBUG_SESSION_ID,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
-            log_file.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-
-
-# #endregion
 
 # Regexes used to scrape data from HTML responses.
 #
@@ -498,19 +468,6 @@ class MunicipalWaterAPI:
                     ...>
         """
         session = await self._get_session()
-        cookie_names = sorted({c.key for c in session.cookie_jar})
-        # #region agent log
-        _agent_log(
-            "A",
-            "api.py:async_get_chart_context:entry",
-            "chart context entry",
-            {
-                "authenticated": self._authenticated,
-                "has_tenant_cookie": self._has_tenant_session(session),
-                "cookie_count": len(cookie_names),
-            },
-        )
-        # #endregion
 
         if not self._authenticated or not self._has_tenant_session(session):
             # IDP cookies may still be present while the tenant cookie expired;
@@ -521,19 +478,12 @@ class MunicipalWaterAPI:
         for attempt in (1, 2):
             html_body, final_url, status = await self._fetch_consumption_page(session)
             diagnosis = self._diagnose_consumption_html(html_body, final_url)
-            # #region agent log
-            _agent_log(
-                "B" if attempt == 1 else "C",
-                "api.py:async_get_chart_context:fetch",
-                "consumption page fetched",
-                {
-                    "attempt": attempt,
-                    "status": status,
-                    "has_tenant_cookie": self._has_tenant_session(session),
-                    **diagnosis,
-                },
+            _LOGGER.debug(
+                "Consumption page attempt %d: status=%s page_type=%s",
+                attempt,
+                status,
+                diagnosis["page_type"],
             )
-            # #endregion
 
             try:
                 attrs = self._extract_charts_data_attrs(html_body)
@@ -545,17 +495,11 @@ class MunicipalWaterAPI:
                         f"url_host={diagnosis['final_url_host']})"
                     ) from None
                 _LOGGER.warning(
-                    "Chart loader missing (page_type=%s); re-authenticating",
+                    "Chart loader missing (page_type=%s, url_host=%s); "
+                    "re-authenticating",
                     diagnosis["page_type"],
+                    diagnosis["final_url_host"],
                 )
-                # #region agent log
-                _agent_log(
-                    "A",
-                    "api.py:async_get_chart_context:retry",
-                    "missing chart loader, forcing re-login",
-                    diagnosis,
-                )
-                # #endregion
                 await self._refresh_authentication()
                 session = await self._get_session()
                 continue
@@ -575,21 +519,9 @@ class MunicipalWaterAPI:
             self._account_start_date = attrs.get("account-start-date")
             self._meter_name = self._extract_meter_name(self._meter_info_json)
 
-            # #region agent log
-            _agent_log(
-                "D",
-                "api.py:async_get_chart_context:success",
-                "chart context cached",
-                {
-                    "attempt": attempt,
-                    "jwt_exp": self._jwt_exp,
-                    "meter_name": self._meter_name,
-                },
-            )
-            # #endregion
-
             _LOGGER.debug(
-                "Cached TSM context: meter=%s, jwt_exp=%s",
+                "Cached TSM context (attempt %d): meter=%s, jwt_exp=%s",
+                attempt,
                 self._meter_name,
                 self._jwt_exp,
             )
