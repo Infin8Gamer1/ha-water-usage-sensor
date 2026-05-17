@@ -52,7 +52,9 @@ from .const import (
     ATTR_LAST_READING_TIME,
     DOMAIN,
     HISTORICAL_IMPORT_DAYS,
+    METER_LAST_REPORTED_KEY,
     METER_NAME,
+    METER_REGISTER_READ_KEY,
     WATER_SENSOR_KEY,
 )
 from .exceptions import (
@@ -75,9 +77,19 @@ async def async_setup_entry(
     assert isinstance(coordinator, WaterUsageCoordinator)
 
     async_add_entities(
-        [WaterUsageSensor(coordinator=coordinator, config_entry=config_entry)]
+        [
+            WaterUsageSensor(
+                coordinator=coordinator, config_entry=config_entry
+            ),
+            MeterLastReportedSensor(
+                coordinator=coordinator, config_entry=config_entry
+            ),
+            MeterRegisterReadSensor(
+                coordinator=coordinator, config_entry=config_entry
+            ),
+        ]
     )
-    _LOGGER.debug("Municipal Water Usage sensor added successfully")
+    _LOGGER.debug("Municipal Water Usage sensors added successfully")
 
 
 class WaterUsageCoordinator(DataUpdateCoordinator):
@@ -119,21 +131,19 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                 start_datetime=start_datetime,
             )
 
+            record = self._build_coordinator_record(data)
+
             usage = data.get("USAGE") if data else None
             if not usage:
                 _LOGGER.warning(
                     "No recent daily water usage data received for account %s",
                     self.account_id,
                 )
-                return {
-                    self.account_id: {
-                        WATER_SENSOR_KEY: 0,
-                        ATTR_LAST_READING_TIME: start_datetime.replace(
-                            tzinfo=ZoneInfo(self.api.timezone)
-                        ),
-                        METER_NAME: data.get(METER_NAME) if data else None,
-                    }
-                }
+                record[WATER_SENSOR_KEY] = 0
+                record[ATTR_LAST_READING_TIME] = start_datetime.replace(
+                    tzinfo=ZoneInfo(self.api.timezone)
+                )
+                return {self.account_id: record}
 
             last_reading = usage[-1]
             _LOGGER.debug(
@@ -142,13 +152,9 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                 self.account_id,
             )
 
-            return {
-                self.account_id: {
-                    WATER_SENSOR_KEY: last_reading["consumption"],
-                    ATTR_LAST_READING_TIME: last_reading["reading_time"],
-                    METER_NAME: data.get(METER_NAME),
-                }
-            }
+            record[WATER_SENSOR_KEY] = last_reading["consumption"]
+            record[ATTR_LAST_READING_TIME] = last_reading["reading_time"]
+            return {self.account_id: record}
 
         except WaterUsageAuthenticationError as err:
             _LOGGER.error("Authentication error fetching water data: %s", err)
@@ -159,6 +165,22 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.exception("Unexpected error fetching water data: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    @staticmethod
+    def _build_coordinator_record(
+        data: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Merge meter metadata from the latest TSM response into coordinator data."""
+        record: Dict[str, Any] = {
+            METER_NAME: data.get(METER_NAME) if data else None,
+            METER_LAST_REPORTED_KEY: (
+                data.get(METER_LAST_REPORTED_KEY) if data else None
+            ),
+            METER_REGISTER_READ_KEY: (
+                data.get(METER_REGISTER_READ_KEY) if data else None
+            ),
+        }
+        return record
 
     # Modeled on https://github.com/tronikos/opower/ for hourly statistics
     # backfill when realtime values aren't available.
@@ -306,85 +328,32 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
         )
 
 
-class WaterUsageSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a municipal water usage sensor."""
-
-    _attr_device_class = SensorDeviceClass.WATER
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
-    _attr_icon = "mdi:water"
+class _MunicipalWaterEntity(CoordinatorEntity, SensorEntity):
+    """Shared base for all municipal water usage sensor entities."""
 
     def __init__(
         self,
         coordinator: WaterUsageCoordinator,
         config_entry: ConfigEntry,
+        *,
+        unique_id_suffix: str,
+        name: str,
     ) -> None:
-        """Initialize the sensor."""
+        """Initialize the entity."""
         super().__init__(coordinator)
-
         self._config_entry = config_entry
         self._config = config_entry.data
         self.account_id: str = self._config.get("account_id", "Unknown")
-
         self._attr_unique_id = (
-            f"{config_entry.unique_id or config_entry.entry_id}_{self.account_id}_water"
+            f"{config_entry.unique_id or config_entry.entry_id}_"
+            f"{self.account_id}_{unique_id_suffix}"
         )
-        self._attr_name = (
-            f"Municipal Water Daily Usage - {self.account_id}"
-        )
+        self._attr_name = name
 
-        _LOGGER.debug(
-            "Initialized Municipal Water Usage sensor with unique_id: %s",
-            self._attr_unique_id,
-        )
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return (
-            self.coordinator.last_update_success
-            and self.native_value is not None
-        )
-
-    @property
-    def native_value(self) -> Optional[float]:
-        """Return the state of the sensor."""
+    def _account_record(self) -> Dict[str, Any]:
         if not self.coordinator.data:
-            return None
-
-        value = (
-            self.coordinator.data.get(self.account_id, {}).get(WATER_SENSOR_KEY)
-        )
-        if value is None:
-            _LOGGER.debug("No water usage value found in coordinator data")
-            return None
-
-        try:
-            return float(value)
-        except (ValueError, TypeError) as err:
-            _LOGGER.warning(
-                "Could not convert water value '%s' to float: %s", value, err
-            )
-            return None
-
-    @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        """Return additional state attributes."""
-        attributes: Dict[str, Any] = {
-            ATTR_ACCOUNT_ID: self.account_id,
-        }
-
-        if self.coordinator.data:
-            record = self.coordinator.data.get(self.account_id, {})
-            last_reading = record.get(ATTR_LAST_READING_TIME)
-            if last_reading:
-                attributes[ATTR_LAST_READING_TIME] = last_reading
-
-            meter_name = record.get(METER_NAME)
-            if meter_name:
-                attributes[METER_NAME] = meter_name
-
-        return attributes
+            return {}
+        return self.coordinator.data.get(self.account_id, {})
 
     @property
     def device_info(self) -> Dict[str, Any]:
@@ -402,3 +371,155 @@ class WaterUsageSensor(CoordinatorEntity, SensorEntity):
             "model": "Water Meter",
             "configuration_url": f"https://{host}",
         }
+
+
+class WaterUsageSensor(_MunicipalWaterEntity):
+    """Latest daily water consumption from the municipal portal."""
+
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
+    _attr_icon = "mdi:water"
+
+    def __init__(
+        self,
+        coordinator: WaterUsageCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator,
+            config_entry,
+            unique_id_suffix="water",
+            name=f"Municipal Water Daily Usage - {config_entry.data.get('account_id', 'Unknown')}",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return (
+            self.coordinator.last_update_success
+            and self.native_value is not None
+        )
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the state of the sensor."""
+        value = self._account_record().get(WATER_SENSOR_KEY)
+        if value is None:
+            return None
+
+        try:
+            return float(value)
+        except (ValueError, TypeError) as err:
+            _LOGGER.warning(
+                "Could not convert water value '%s' to float: %s", value, err
+            )
+            return None
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return additional state attributes."""
+        attributes: Dict[str, Any] = {
+            ATTR_ACCOUNT_ID: self.account_id,
+        }
+
+        record = self._account_record()
+        last_reading = record.get(ATTR_LAST_READING_TIME)
+        if last_reading:
+            attributes[ATTR_LAST_READING_TIME] = last_reading
+
+        meter_name = record.get(METER_NAME)
+        if meter_name:
+            attributes[METER_NAME] = meter_name
+
+        return attributes
+
+
+class MeterLastReportedSensor(_MunicipalWaterEntity):
+    """When the utility meter last communicated with Tyler Smart Meters."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(
+        self,
+        coordinator: WaterUsageCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator,
+            config_entry,
+            unique_id_suffix="meter_last_reported",
+            name=(
+                f"Municipal Water Meter Last Reported - "
+                f"{config_entry.data.get('account_id', 'Unknown')}"
+            ),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return (
+            self.coordinator.last_update_success
+            and self.native_value is not None
+        )
+
+    @property
+    def native_value(self) -> Optional[datetime]:
+        """Return the last-reported timestamp from the portal."""
+        value = self._account_record().get(METER_LAST_REPORTED_KEY)
+        if isinstance(value, datetime):
+            return value
+        return None
+
+
+class MeterRegisterReadSensor(_MunicipalWaterEntity):
+    """Cumulative register read shown on the portal billing sidebar."""
+
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfVolume.GALLONS
+    _attr_icon = "mdi:water-pump"
+
+    def __init__(
+        self,
+        coordinator: WaterUsageCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator,
+            config_entry,
+            unique_id_suffix="meter_register_read",
+            name=(
+                f"Municipal Water Meter Read - "
+                f"{config_entry.data.get('account_id', 'Unknown')}"
+            ),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return (
+            self.coordinator.last_update_success
+            and self.native_value is not None
+        )
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the cumulative register read in gallons."""
+        value = self._account_record().get(METER_REGISTER_READ_KEY)
+        if value is None:
+            return None
+
+        try:
+            return float(value)
+        except (ValueError, TypeError) as err:
+            _LOGGER.warning(
+                "Could not convert meter register read '%s' to float: %s",
+                value,
+                err,
+            )
+            return None

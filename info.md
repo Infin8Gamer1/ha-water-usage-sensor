@@ -8,6 +8,7 @@ A Home Assistant custom integration that connects to a municipal utility portal 
 - Hourly + daily statistics for back-dated history (90 days by default)
 - Automatically handles the multi-step OpenID Connect login and the short-lived Tyler Smart Meters JWT
 - Converts the meter's native HGAL (hundreds of gallons) readings to gallons before storing
+- Sensors for meter last reported time and cumulative register read from the portal
 - Configurable polling interval (15-1440 minutes)
 - Secure credential storage via Home Assistant's config flow
 - Robust retry / session-refresh logic

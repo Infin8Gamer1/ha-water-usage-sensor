@@ -16,7 +16,11 @@ from custom_components.municipal_water_usage.api import (
     _format_tsm_end_date,
     _format_tsm_start_date,
 )
-from custom_components.municipal_water_usage.const import HGAL_TO_GALLONS
+from custom_components.municipal_water_usage.const import (
+    HGAL_TO_GALLONS,
+    METER_LAST_REPORTED_KEY,
+    METER_REGISTER_READ_KEY,
+)
 from custom_components.municipal_water_usage.exceptions import (
     WaterUsageAuthenticationError,
     WaterUsageDataError,
@@ -95,8 +99,21 @@ def _build_consumption_html(jwt: str) -> str:
     """
 
 
-TSM_HOURLY_HTML = """
+TSM_METER_STATUS_HTML = """
+<forge-label-value>
+    <span slot="label">Meter last reported</span>
+    <span slot="value" aria-label="May 16th 2026 - 12:00 AM">
+        05/16/2026 - 12:00 AM <br />
+    </span>
+    <span slot="value" aria-label="Read: 163776.70">
+        Read: 163776.70
+    </span>
+</forge-label-value>
+"""
+
+TSM_HOURLY_HTML = f"""
 <html><body>
+{TSM_METER_STATUS_HTML}
 <script>
 var series0 = [], reads0 = [], ticks = [];
 series0.push(['05/14/2026 00:00:00', 0.84]);
@@ -407,6 +424,42 @@ async def test_async_get_usage_sends_minimal_body_and_parses_series():
     assert usage[1]["consumption"] == pytest.approx(0.23 * HGAL_TO_GALLONS)
     assert usage[2]["consumption"] == 0.0
     assert result["meter_name"] == "MIU 131356596"
+    reported = result[METER_LAST_REPORTED_KEY]
+    assert reported.year == 2026
+    assert reported.month == 5
+    assert reported.day == 16
+    assert reported.hour == 0
+    assert result[METER_REGISTER_READ_KEY] == pytest.approx(163776.70)
+
+
+def test_parse_tsm_html_extracts_meter_status():
+    """Billing sidebar fields are parsed from TSM HTML."""
+    api = _make_api()
+    api._meter_name = "MIU 131356596"
+
+    result = api._parse_tsm_html(TSM_HOURLY_HTML)
+
+    reported = result[METER_LAST_REPORTED_KEY]
+    assert reported.tzinfo is not None
+    assert reported.strftime("%m/%d/%Y %I:%M %p") == "05/16/2026 12:00 AM"
+    assert result[METER_REGISTER_READ_KEY] == pytest.approx(163776.70)
+
+
+def test_parse_tsm_html_meter_status_optional():
+    """Usage parsing still works when the billing sidebar is absent."""
+    api = _make_api()
+    api._meter_name = "MIU 1"
+
+    html = """
+    <script>
+    series0.push(['05/14/2026 00:00:00', 1.0]);
+    </script>
+    """
+    result = api._parse_tsm_html(html)
+
+    assert len(result["USAGE"]) == 1
+    assert METER_LAST_REPORTED_KEY not in result
+    assert METER_REGISTER_READ_KEY not in result
 
 
 @pytest.mark.asyncio

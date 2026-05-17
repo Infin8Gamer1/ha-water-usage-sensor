@@ -43,7 +43,9 @@ from .const import (
     IDP_HOST,
     JWT_REFRESH_MARGIN,
     MAX_RETRIES,
+    METER_LAST_REPORTED_KEY,
     METER_NAME,
+    METER_REGISTER_READ_KEY,
     RETRY_DELAY,
     SESSION_TIMEOUT,
     TSM_HOST,
@@ -96,6 +98,19 @@ _DATA_ATTR_RE = re.compile(
 )
 _SERIES_PUSH_RE = re.compile(
     r"series0\.push\(\['([^']+)',\s*(-?[\d.]+)\]\);"
+)
+# Billing sidebar on TSM chart pages (forge UI).
+_METER_LAST_REPORTED_RE = re.compile(
+    r"Meter last reported.*?(\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}:\d{2}\s*(?:AM|PM))",
+    re.IGNORECASE | re.DOTALL,
+)
+_METER_REGISTER_READ_ARIA_RE = re.compile(
+    r"""aria-label=["']Read:\s*([\d,.]+)["']""",
+    re.IGNORECASE,
+)
+_METER_REGISTER_READ_TEXT_RE = re.compile(
+    r"Read:\s*([\d,.]+)",
+    re.IGNORECASE,
 )
 
 
@@ -897,10 +912,48 @@ class MunicipalWaterAPI:
         # downstream statistics importing relies on it.
         readings.sort(key=lambda r: r["reading_time"])
 
-        return {
+        meter_status = self._parse_meter_status_from_tsm(html_body, tz)
+
+        result: Dict[str, Any] = {
             "USAGE": readings,
             METER_NAME: self._meter_name,
         }
+        result.update(meter_status)
+        return result
+
+    def _parse_meter_status_from_tsm(
+        self, html_body: str, tz: ZoneInfo
+    ) -> Dict[str, Any]:
+        """Extract meter telemetry sidebar fields from a TSM HTML response."""
+        status: Dict[str, Any] = {}
+
+        reported_match = _METER_LAST_REPORTED_RE.search(html_body)
+        if reported_match:
+            reported_text = reported_match.group(1).strip()
+            try:
+                naive = datetime.strptime(
+                    reported_text, "%m/%d/%Y - %I:%M %p"
+                )
+                status[METER_LAST_REPORTED_KEY] = naive.replace(tzinfo=tz)
+            except ValueError:
+                _LOGGER.debug(
+                    "Could not parse meter last reported time: %s",
+                    reported_text,
+                )
+
+        read_match = _METER_REGISTER_READ_ARIA_RE.search(html_body)
+        if not read_match:
+            read_match = _METER_REGISTER_READ_TEXT_RE.search(html_body)
+        if read_match:
+            read_text = read_match.group(1).replace(",", "")
+            try:
+                status[METER_REGISTER_READ_KEY] = float(read_text)
+            except ValueError:
+                _LOGGER.debug(
+                    "Could not parse meter register read: %s", read_text
+                )
+
+        return status
 
 
 def _format_tsm_start_date(dt: datetime) -> str:

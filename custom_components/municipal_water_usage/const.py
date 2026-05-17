@@ -42,6 +42,8 @@ USER_AGENT = (
 
 # Sensor constants
 WATER_SENSOR_KEY = "current_water_usage"
+METER_LAST_REPORTED_KEY = "meter_last_reported"
+METER_REGISTER_READ_KEY = "meter_register_read"
 ATTR_LAST_READING_TIME = "last_reading_time"
 ATTR_ACCOUNT_ID = "account_id"
 METER_NAME = "meter_name"

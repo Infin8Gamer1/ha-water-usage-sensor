@@ -3,35 +3,35 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![License](https://img.shields.io/github/license/Infin8Gamer1/ha-water-usage-sensor)](LICENSE)
 
-A Home Assistant custom integration that pulls hourly **water consumption** data from a `municipalonlinepayments.com`-hosted utility portal (default target: City of Bastrop, TX) and imports it as long-term statistics so it shows up in Home Assistant's **Energy dashboard → Water** section.
+A Home Assistant custom integration that pulls **hourly and daily water consumption** from a `municipalonlinepayments.com`-hosted utility portal (default target: City of Bastrop, TX) and imports it as long-term statistics so it shows up in Home Assistant's **Energy dashboard → Water** section.
 
-This integration is forked from [`gagata/ha-smarthub-energy-sensor`](https://github.com/gagata/ha-smarthub-energy-sensor) and reuses its battle-tested statistics-import, coordinator, and config-flow patterns.
+This integration is forked from [`gagata/ha-smarthub-energy-sensor`](https://github.com/gagata/ha-smarthub-energy-sensor) and reuses its statistics-import, coordinator, and config-flow patterns.
 
 ## Features
 
-- **Energy Dashboard Integration** - hourly statistics back-fill into the Water section of the Energy dashboard
-- **Hourly + Daily statistics** - configurable historical backfill (90 days by default)
-- **Automatic OIDC login** - handles the full `account.municipalonlinepayments.com` OpenID Connect flow and the short-lived Tyler Smart Meters JWT in the background
-- **HGAL → gallons** - readings come from the meter in Hundreds of Gallons; this integration converts them to gallons before storing
-- **Configurable polling** - 15 to 1440 minutes
-- **Robust error handling** - automatic JWT refresh, re-authentication on session expiry, retry with backoff on transient errors
+- **Energy Dashboard integration** — hourly statistics back-fill into the Water section of the Energy dashboard
+- **Hourly + daily statistics** — configurable historical backfill (90 days by default)
+- **Automatic OIDC login** — full `account.municipalonlinepayments.com` OpenID Connect flow plus short-lived Tyler Smart Meters JWT handling
+- **HGAL → gallons** — chart usage values are in Hundreds of Gallons; converted to gallons before storage
+- **Meter telemetry sensors** — portal “Meter last reported” time and cumulative register read
+- **Configurable polling** — 15 to 1440 minutes (default 6 hours)
+- **Robust error handling** — JWT refresh, re-authentication on session expiry, retries with backoff
 
 ## Installation
 
 ### Option 1: HACS (Recommended)
 
 1. Open HACS in your Home Assistant instance
-2. Click the three-dot menu and select "Custom repositories"
+2. Click the three-dot menu and select **Custom repositories**
 3. Add this repository URL: `https://github.com/Infin8Gamer1/ha-water-usage-sensor`
-4. Select "Integration" as the category
-5. Click "ADD" and then search for "Municipal Water Usage"
-6. Click "Download" to install
+4. Select **Integration** as the category
+5. Click **ADD**, then search for **Municipal Water Usage**
+6. Click **Download** to install
 
 ### Option 2: Manual Installation
 
-1. Download the latest release
-2. Extract the `municipal_water_usage` folder to your `custom_components` directory
-3. Restart Home Assistant
+1. Copy the `municipal_water_usage` folder into `config/custom_components/`
+2. Restart Home Assistant
 
 ```
 config/
@@ -55,79 +55,101 @@ config/
 
 ### Requirements
 
-Before setting up the integration, gather:
+Before setup, gather:
 
-1. **Email Address** - login email for the municipal portal
-2. **Password** - portal password
-3. **Account ID** - your utility account number as it appears in the consumption page URL, e.g. `14-6402-01`
-4. **Host** - tenant host portion of the portal URL, e.g. `bastroptx.municipalonlinepayments.com`
-5. **Timezone** - local timezone of the utility (default: `America/Chicago`)
+1. **Email** — portal login email
+2. **Password** — portal password
+3. **Account ID** — utility account number from the consumption page URL (e.g. `14-6402-01`)
+4. **Host** — tenant host only, e.g. `bastroptx.municipalonlinepayments.com` (no `https://`)
+5. **Timezone** — utility local time (default: `America/Chicago`)
 
-### Setup Process
+### Setup
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **"+ Add Integration"**
-3. Search for **"Municipal Water Usage"**
-4. Fill in the form and submit. The integration validates by logging in to the portal.
+1. **Settings** → **Devices & Services** → **Add Integration**
+2. Search for **Municipal Water Usage**
+3. Enter credentials and account details. The integration validates by logging in and loading the consumption page for your account ID.
+
+The first coordinator refresh can take several minutes while up to 90 days of hourly and daily statistics are imported.
+
+## Entities
+
+Each configured account creates one device with three sensors:
+
+| Entity | What it shows |
+|--------|----------------|
+| **Municipal Water Daily Usage** | Gallons consumed on the most recent day returned in the daily chart (live snapshot, not the Energy dashboard source) |
+| **Municipal Water Meter Last Reported** | When the utility meter last communicated (`device_class: timestamp`) — matches the portal billing sidebar |
+| **Municipal Water Meter Read** | Cumulative register read in gallons (`device_class: water`, `state_class: total_increasing`) — matches **Read:** on the portal |
+
+The daily usage sensor also exposes attributes:
+
+- `account_id` — configured account number
+- `last_reading_time` — timestamp of that daily usage bar (not the same as “Meter last reported”)
+- `meter_name` — e.g. `MIU 131356596`
 
 ## Energy Dashboard Integration
 
-Once configured, the sensor publishes a water entity with the correct device and state classes for water monitoring.
+Use the **hourly** long-term statistic for the Energy dashboard, not the live daily sensor state.
 
-### Adding to the Energy Dashboard
+1. **Settings** → **Dashboards** → **Energy**
+2. Under **Water**, click **Add Water Source**
+3. Select **`municipal_water_usage:water_usage_<account_id>`** (no `_daily_` suffix)
 
-1. Go to **Settings** → **Dashboards** → **Energy**
-2. Scroll to the **Water** section, click **"Add Water Source"**
-3. Select the statistic named `municipal_water_usage:water_usage_<account>` (the hourly variant)
+Statistic IDs:
 
-### Sensor Details
-
-- **Device Class**: `water`
-- **State Class**: `total_increasing`
-- **Unit**: `gal` (`UnitOfVolume.GALLONS`)
-- **Icon**: `mdi:water`
+| Statistic | ID pattern |
+|-----------|------------|
+| Hourly (Energy dashboard) | `municipal_water_usage:water_usage_<account_id>` |
+| Daily | `municipal_water_usage:water_usage_daily_<account_id>` |
 
 ## Configuration Options
 
-By default the integration polls every 6 hours. You can adjust this when configuring or reconfiguring the integration. Municipal portals typically update hourly with a delay of several hours, so very low polling intervals will not yield more frequent updates.
+Default polling is every **6 hours**. Municipal portals typically post hourly usage with a delay of several hours; polling more often does not pull new data faster.
+
+Reconfigure via **Settings** → **Devices & Services** → your integration → **Configure**.
 
 ## How it works
 
-The portal is a thin SaaS frontend (Municipal Online Payments) that delegates auth to a shared identity provider and reads meter data from Tyler Smart Meters:
+The portal (Municipal Online Payments) authenticates via a shared identity provider and loads charts from Tyler Smart Meters:
 
-1. **Login** (`async_login`) — drives the full OpenID Connect flow against `account.municipalonlinepayments.com`, including scraping the anti-forgery token from the login form and replaying the `signin-oidc` form_post callback that browsers normally auto-submit.
-2. **Token acquisition** (`async_get_chart_context`) — fetches the per-account consumption page on the tenant host and extracts a ~30-minute JWT plus meter metadata from the `<script src="https://www.tylersmartmeters.com/charts.js" data-…>` block.
-3. **Data fetch** (`async_get_usage`) — POSTs a minimal form (JWT + interval + date window + meter info) to `https://www.tylersmartmeters.com/`. The response is HTML with inline JS containing `series0.push(['MM/DD/YYYY HH:MM:SS', value])` lines.
-4. **Unit conversion** — the meter reports in HGAL (hundreds of gallons), so every value is multiplied by 100 to produce gallons before storage.
+1. **Login** (`async_login`) — OpenID Connect against `account.municipalonlinepayments.com`, including the `signin-oidc` form_post callback (single- or double-quoted HTML attributes).
+2. **Chart context** (`async_get_chart_context`) — Loads the account consumption page and extracts a ~30-minute JWT, meter metadata, and billing history from the `charts.js` script tag.
+3. **Usage fetch** (`async_get_usage`) — POSTs the full chart view-state (JWT, interval, date window, billing cycles, meter info) to `https://www.tylersmartmeters.com/`. The HTML response includes `series0.push([...])` usage lines and the billing sidebar (“Meter last reported”, register read).
+4. **Unit conversion** — chart values are HGAL; multiplied by 100 for gallons. Register read from the sidebar is already shown in gallons on the portal.
 
-JWTs are refreshed automatically when they expire; full re-login happens if the chart context is also rejected.
+JWTs refresh automatically; full re-login runs if the tenant session or chart context is rejected.
 
 ## Troubleshooting
 
-### Common Issues
+**Cannot connect**
 
-**"Cannot Connect" Error**
-- Verify the host is correct (no `https://`, no trailing slash)
-- Check your internet connection
-- Make sure the portal is reachable from your Home Assistant host
+- Host must be hostname only (no `https://`, no path)
+- Confirm the portal is reachable from the Home Assistant host
 
-**"Invalid Authentication" Error**
-- Double-check your email and password
-- Try logging into the portal manually to verify
-- Some portals temporarily lock out after repeated failures; wait and try again
+**Invalid authentication**
 
-**"No Data Available"**
-- Confirm the account ID matches the value in the consumption page URL (e.g. `14-6402-01`)
-- Check that recent usage data is visible on the portal manually
-- Many municipal portals update hourly with a delay; back-filled hourly statistics are normal
+- Verify email/password in the portal UI
+- Wait if the account was locked after repeated failures
 
-**"Account ID not found on this portal"**
-- The portal accepted your credentials but the consumption page for that account ID does not exist. Double-check the number in `https://<host>/bastroptx/utilities/accounts/consumption/<this-part>`
+**No data / empty Energy chart**
 
-**"Statistics offset from the right time"**
-- Update the timezone to match the utility's local time (reconfigure the integration)
+- Confirm usage appears on the portal for the same account ID
+- Hourly data often lags by several hours
+- Check logs with debug logging enabled (below)
 
-### Debug Logging
+**Account ID not found**
+
+- Credentials worked but the consumption URL for that account ID does not exist
+
+**Statistics offset in time**
+
+- Set timezone to the utility’s local zone (reconfigure the integration)
+
+**Meter Last Reported / Meter Read unavailable**
+
+- These are parsed from the Tyler chart HTML. If the portal layout changes or the billing card is hidden, the sensors may stay unavailable while usage statistics still work.
+
+### Debug logging
 
 ```yaml
 # configuration.yaml
@@ -139,15 +161,15 @@ logger:
 
 ## Security & Privacy
 
-- Credentials are stored by Home Assistant's encrypted configuration store
-- All API calls use HTTPS with SSL verification
-- Session cookies are handled in-memory only; the integration never writes them to disk
+- Credentials are stored in Home Assistant’s encrypted config store
+- HTTPS with certificate verification
+- Session cookies stay in memory only
 
 ## Local Development
 
-You can develop and validate the API scraping layer **without a running Home Assistant instance**. The live smoke runner drives the real portal against your credentials and prints the parsed hourly/daily readings to the console.
+You can validate scraping **without** a running Home Assistant instance.
 
-### Initial setup
+### Setup
 
 Windows (PowerShell):
 
@@ -155,9 +177,8 @@ Windows (PowerShell):
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip wheel
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-
 Copy-Item .env.example .env
-# Edit .env and fill in MWU_EMAIL / MWU_PASSWORD / MWU_ACCOUNT_ID / MWU_HOST
+# Edit .env: MWU_EMAIL, MWU_PASSWORD, MWU_ACCOUNT_ID, MWU_HOST
 ```
 
 macOS / Linux / WSL:
@@ -166,69 +187,46 @@ macOS / Linux / WSL:
 python3 -m venv .venv
 ./.venv/bin/python -m pip install --upgrade pip wheel
 ./.venv/bin/python -m pip install -r requirements-dev.txt
-
 cp .env.example .env
-# Edit .env and fill in MWU_EMAIL / MWU_PASSWORD / MWU_ACCOUNT_ID / MWU_HOST
 ```
 
 ### Live API smoke runner
 
-`scripts/test_api_live.py` is the primary local feedback loop. It loads `.env`, drives the real portal, and prints what it scrapes:
-
 ```powershell
-# Run all four stages: login -> chart context -> hourly fetch -> daily fetch
+# All stages: login → chart context → hourly → daily
 .\.venv\Scripts\python.exe scripts/test_api_live.py
 
-# Just login + JWT extraction (fast, useful when iterating on the OIDC flow)
+# Login + JWT only
 .\.venv\Scripts\python.exe scripts/test_api_live.py --steps login,chart-context
 
-# DEBUG-level logging shows every HTTP request, redirect, retry
 .\.venv\Scripts\python.exe scripts/test_api_live.py -v
-
-# Print every reading instead of the first 24
-.\.venv\Scripts\python.exe scripts/test_api_live.py --steps fetch-hourly --full
 ```
 
-The script ignores the integration's HA `__init__.py` and only imports `api.py` + its dependencies, so it works on native Windows without WSL.
+VS Code / Cursor: use **Live API smoke** configurations in `.vscode/launch.json`.
 
-If you use VS Code / Cursor, `.vscode/launch.json` ships with debug configurations for each stage — set breakpoints in `api.py` and run "Live API smoke (login only)" from the Run/Debug panel to step through the OIDC flow.
-
-### Tests
-
-The pure-Python unit tests (parser, formatters, OIDC HTML scraping, JWT decoding) run anywhere:
+### Unit tests
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_api.py tests/test_utils.py -p "no:homeassistant"
 ```
 
-The full integration tests (`test_config_flow.py`, `test_coordinator.py`, `test_integration.py`) exercise Home Assistant's recorder, which imports `fcntl` and therefore only runs on Linux / macOS / WSL. CI runs the full suite via [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+Full HA integration tests need Linux / macOS / WSL (recorder / `fcntl`). CI runs the complete suite in [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
-To run the full suite locally on WSL or Linux:
-
-```bash
-./.venv/bin/python -m pytest tests/
-```
-
-### Deploying to Home Assistant
-
-Once the smoke runner reports good data, copy the integration to your HA instance:
+### Deploy to Home Assistant
 
 ```bash
-# From the repo root on your dev machine
 scp -r custom_components/municipal_water_usage \
-    pi@homeassistant.local:/config/custom_components/
-
-# On the HA host, restart Home Assistant Core
-ssh pi@homeassistant.local "ha core restart"
+    user@homeassistant.local:/config/custom_components/
+# Restart Home Assistant Core
 ```
 
-Or use the HACS "Reinstall" flow from the HA UI once this repo is published.
+Or reinstall via HACS after publishing the repo.
 
 ## Credits
 
-- Forked from [`gagata/ha-smarthub-energy-sensor`](https://github.com/gagata/ha-smarthub-energy-sensor); statistics-import architecture inspired by [`tronikos/opower`](https://github.com/tronikos/opower)
+- Forked from [`gagata/ha-smarthub-energy-sensor`](https://github.com/gagata/ha-smarthub-energy-sensor); statistics architecture inspired by [`tronikos/opower`](https://github.com/tronikos/opower)
 - Adapted for municipal water portals by [@Infin8Gamer1](https://github.com/infin8gamer1)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).
