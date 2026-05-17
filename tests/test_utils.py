@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 from custom_components.municipal_water_usage.utils import (
     parse_epoch_set_timezone,
     sanitize_host,
+    sanitize_statistic_id_slug,
+    water_usage_statistic_id,
 )
 
 
@@ -21,6 +23,22 @@ def test_sanitize_host():
 
     for input_host, expected_host in test_cases:
         assert sanitize_host(input_host) == expected_host
+
+
+def test_sanitize_statistic_id_slug():
+    """Account IDs with hyphens must become valid HA statistic slugs."""
+    assert sanitize_statistic_id_slug("14-6402-01") == "14_6402_01"
+    assert sanitize_statistic_id_slug("  ABC-123  ") == "abc_123"
+    assert sanitize_statistic_id_slug("") == "unknown"
+
+
+def test_water_usage_statistic_id():
+    assert water_usage_statistic_id("14-6402-01") == (
+        "municipal_water_usage:water_usage_14_6402_01"
+    )
+    assert water_usage_statistic_id("14-6402-01", "_daily") == (
+        "municipal_water_usage:water_usage_daily_14_6402_01"
+    )
 
 
 def test_parse_epoch_set_timezone():

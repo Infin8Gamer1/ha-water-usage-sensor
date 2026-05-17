@@ -93,14 +93,14 @@ Use the **hourly** long-term statistic for the Energy dashboard, not the live da
 
 1. **Settings** → **Dashboards** → **Energy**
 2. Under **Water**, click **Add Water Source**
-3. Select **`municipal_water_usage:water_usage_<account_id>`** (no `_daily_` suffix)
+3. Select the **hourly** statistic for your account (no `_daily_` in the name)
 
-Statistic IDs:
+Statistic IDs use a slug derived from your account ID (hyphens become underscores). For account `14-6402-01`:
 
-| Statistic | ID pattern |
-|-----------|------------|
-| Hourly (Energy dashboard) | `municipal_water_usage:water_usage_<account_id>` |
-| Daily | `municipal_water_usage:water_usage_daily_<account_id>` |
+| Statistic | Statistic ID |
+|-----------|----------------|
+| Hourly (Energy dashboard) | `municipal_water_usage:water_usage_14_6402_01` |
+| Daily | `municipal_water_usage:water_usage_daily_14_6402_01` |
 
 ## Configuration Options
 

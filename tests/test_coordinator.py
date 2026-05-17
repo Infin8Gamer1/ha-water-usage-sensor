@@ -16,11 +16,9 @@ from custom_components.municipal_water_usage.api import (
     Aggregation,
     MunicipalWaterAPI,
 )
-from custom_components.municipal_water_usage.const import (
-    DOMAIN,
-    HGAL_TO_GALLONS,
-)
+from custom_components.municipal_water_usage.const import HGAL_TO_GALLONS
 from custom_components.municipal_water_usage.sensor import WaterUsageCoordinator
+from custom_components.municipal_water_usage.utils import water_usage_statistic_id
 
 
 # Synthetic TSM responses for hourly + daily intervals.
@@ -104,7 +102,7 @@ async def test_coordinator_first_run_imports_hourly_water_stats(
     await coordinator._async_update_data()
     await _async_wait_recording_done(hass)
 
-    statistic_id = f"{DOMAIN}:water_usage_14-6402-01"
+    statistic_id = water_usage_statistic_id("14-6402-01")
     stats = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
         hass,
@@ -142,7 +140,7 @@ async def test_coordinator_also_imports_daily_stats(
     await coordinator._async_update_data()
     await _async_wait_recording_done(hass)
 
-    daily_id = f"{DOMAIN}:water_usage_daily_14-6402-01"
+    daily_id = water_usage_statistic_id("14-6402-01", "_daily")
     stats = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
         hass,

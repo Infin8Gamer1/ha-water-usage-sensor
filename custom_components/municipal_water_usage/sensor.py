@@ -61,6 +61,7 @@ from .exceptions import (
     WaterUsageAuthenticationError,
     WaterUsageError,
 )
+from .utils import sanitize_statistic_id_slug
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -186,8 +187,9 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
     # backfill when realtime values aren't available.
     async def _insert_statistics(self, aggregation: Aggregation) -> None:
         """Retrieve usage data and append it to Home Assistant's long-term statistics."""
+        account_slug = sanitize_statistic_id_slug(self.account_id)
         consumption_statistic_id = (
-            f"{DOMAIN}:water_usage{aggregation.suffix}_{self.account_id}"
+            f"{DOMAIN}:water_usage{aggregation.suffix}_{account_slug}"
         )
         consumption_unit_class = VolumeConverter.UNIT_CLASS
         consumption_unit = UnitOfVolume.GALLONS
