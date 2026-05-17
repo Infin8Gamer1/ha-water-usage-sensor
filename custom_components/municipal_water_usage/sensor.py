@@ -106,34 +106,29 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
         try:
             _LOGGER.debug("Fetching data from Municipal Water Usage API")
 
-            # Force re-authentication so we always start from a clean session.
-            self.api._authenticated = False
-
-            for aggregation in (
-                Aggregation.HOURLY,
-                Aggregation.DAILY,
-                Aggregation.MONTHLY,
-            ):
+            for aggregation in (Aggregation.HOURLY, Aggregation.DAILY):
                 await self._insert_statistics(aggregation)
 
-            first_day_of_current_month = datetime.now().replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0
-            )
+            # Use a short daily window to populate the live sensor state.
+            start_datetime = datetime.now().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=7)
+
             data = await self.api.async_get_usage(
-                aggregation=Aggregation.MONTHLY,
-                start_datetime=first_day_of_current_month,
+                aggregation=Aggregation.DAILY,
+                start_datetime=start_datetime,
             )
 
             usage = data.get("USAGE") if data else None
             if not usage:
                 _LOGGER.warning(
-                    "No monthly water usage data received for account %s",
+                    "No recent daily water usage data received for account %s",
                     self.account_id,
                 )
                 return {
                     self.account_id: {
                         WATER_SENSOR_KEY: 0,
-                        ATTR_LAST_READING_TIME: first_day_of_current_month.replace(
+                        ATTR_LAST_READING_TIME: start_datetime.replace(
                             tzinfo=ZoneInfo(self.api.timezone)
                         ),
                         METER_NAME: data.get(METER_NAME) if data else None,
@@ -142,7 +137,7 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
 
             last_reading = usage[-1]
             _LOGGER.debug(
-                "Latest monthly reading: %s for account %s",
+                "Latest daily reading: %s for account %s",
                 last_reading,
                 self.account_id,
             )
@@ -335,7 +330,7 @@ class WaterUsageSensor(CoordinatorEntity, SensorEntity):
             f"{config_entry.unique_id or config_entry.entry_id}_{self.account_id}_water"
         )
         self._attr_name = (
-            f"Municipal Water Monthly Usage - {self.account_id}"
+            f"Municipal Water Daily Usage - {self.account_id}"
         )
 
         _LOGGER.debug(

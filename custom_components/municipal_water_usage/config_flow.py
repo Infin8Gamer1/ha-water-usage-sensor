@@ -36,6 +36,7 @@ from .const import (
 from .exceptions import (
     WaterUsageAuthenticationError,
     WaterUsageConnectionError,
+    WaterUsageDataError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class MunicipalWaterUsageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except WaterUsageConnectionError:
                 errors["base"] = "cannot_connect"
+            except WaterUsageDataError:
+                errors["base"] = "invalid_account"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception during config validation")
                 errors["base"] = "unknown"
@@ -129,5 +132,6 @@ class MunicipalWaterUsageConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         try:
             await api.async_login()
+            await api.async_get_chart_context()
         finally:
             await api.close()

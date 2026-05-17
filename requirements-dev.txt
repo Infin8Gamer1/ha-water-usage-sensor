@@ -1,0 +1,25 @@
+# Dev / test dependencies for the Municipal Water Usage integration.
+# Keep these aligned with .github/workflows/tests.yml.
+
+# Pytest + async helpers.
+pytest>=8.0
+pytest-asyncio>=0.21
+
+# Home Assistant core + the community test harness for custom components.
+# pytest-homeassistant-custom-component pulls in a matching HA pin, but
+# we also pin HA explicitly so live API smoke tests run against the same
+# version as CI.
+homeassistant>=2025.11
+pytest-homeassistant-custom-component
+
+# Recorder-side helpers HA needs at import time.
+psutil-home-assistant
+fnv-hash-fast
+ulid-transform
+
+# Runtime requirement of the integration itself (mirrors manifest.json).
+aiohttp>=3.8.0
+
+# Convenience for the live API smoke runner — reads ./.env so you don't have
+# to set MWU_* env vars by hand in every shell.
+python-dotenv>=1.0
