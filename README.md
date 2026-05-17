@@ -1,7 +1,7 @@
 # Home Assistant Municipal Water Usage Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![License](https://img.shields.io/github/license/jacobholyfield/ha-water-usage-sensor)](LICENSE)
+[![License](https://img.shields.io/github/license/Infin8Gamer1/ha-water-usage-sensor)](LICENSE)
 
 A Home Assistant custom integration that pulls hourly **water consumption** data from a `municipalonlinepayments.com`-hosted utility portal (default target: City of Bastrop, TX) and imports it as long-term statistics so it shows up in Home Assistant's **Energy dashboard → Water** section.
 
@@ -21,7 +21,7 @@ This integration is forked from [`gagata/ha-smarthub-energy-sensor`](https://git
 
 1. Open HACS in your Home Assistant instance
 2. Click the three-dot menu and select "Custom repositories"
-3. Add this repository URL: `https://github.com/jacobholyfield/ha-water-usage-sensor`
+3. Add this repository URL: `https://github.com/Infin8Gamer1/ha-water-usage-sensor`
 4. Select "Integration" as the category
 5. Click "ADD" and then search for "Municipal Water Usage"
 6. Click "Download" to install
