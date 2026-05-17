@@ -62,7 +62,18 @@ def mock_water_api() -> Generator[MunicipalWaterAPI]:
     async def fake_async_get_usage(aggregation, start_datetime, end_datetime=None):
         return _fake_get_usage(api, aggregation, start_datetime, end_datetime)
 
-    with patch.object(api, "async_get_usage", side_effect=fake_async_get_usage):
+    async def fake_async_get_hourly_usage_range(
+        start_datetime, end_datetime=None
+    ):
+        return _fake_get_usage(api, Aggregation.HOURLY, start_datetime, end_datetime)
+
+    with patch.object(
+        api, "async_get_usage", side_effect=fake_async_get_usage
+    ), patch.object(
+        api,
+        "async_get_hourly_usage_range",
+        side_effect=fake_async_get_hourly_usage_range,
+    ):
         yield api
 
 

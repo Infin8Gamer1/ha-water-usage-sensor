@@ -48,6 +48,7 @@ from .const import (
     METER_REGISTER_READ_KEY,
     RETRY_DELAY,
     SESSION_TIMEOUT,
+    TSM_DAY_FETCH_DELAY,
     TSM_HOST,
     USER_AGENT,
 )
@@ -606,6 +607,72 @@ class MunicipalWaterAPI:
         raise WaterUsageError(
             f"Failed to retrieve usage data after {MAX_RETRIES} attempts"
         )
+
+    async def async_get_hourly_usage_range(
+        self,
+        start_datetime: datetime,
+        end_datetime: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Fetch hourly usage for each calendar day in the inclusive date range.
+
+        Tyler Smart Meters only returns one day of hourly bars per POST. A
+        90-day Energy dashboard backfill therefore requires one request per day.
+        """
+        tz = ZoneInfo(self.timezone)
+        start = self._local_day_start(start_datetime, tz)
+        end = self._local_day_start(
+            end_datetime or datetime.now(tz), tz
+        )
+        if end < start:
+            start, end = end, start
+
+        merged: List[Dict[str, Any]] = []
+        meter_status: Dict[str, Any] = {}
+        day = start
+        day_count = (end.date() - start.date()).days + 1
+        day_index = 0
+
+        while day <= end:
+            day_index += 1
+            if day_index == 1 or day_index % 10 == 0 or day_index == day_count:
+                _LOGGER.info(
+                    "Fetching hourly usage for %s (%d/%d)",
+                    day.date().isoformat(),
+                    day_index,
+                    day_count,
+                )
+
+            day_data = await self.async_get_usage(
+                aggregation=Aggregation.HOURLY,
+                start_datetime=day,
+                end_datetime=day,
+            )
+            merged.extend(day_data.get("USAGE", []))
+            meter_status = {
+                k: day_data[k]
+                for k in (METER_NAME, METER_LAST_REPORTED_KEY, METER_REGISTER_READ_KEY)
+                if k in day_data
+            }
+
+            day += timedelta(days=1)
+            if day <= end and TSM_DAY_FETCH_DELAY > 0:
+                await asyncio.sleep(TSM_DAY_FETCH_DELAY)
+
+        merged.sort(key=lambda r: r["reading_time"])
+        result: Dict[str, Any] = {"USAGE": merged}
+        result.update(meter_status)
+        if self._meter_name and METER_NAME not in result:
+            result[METER_NAME] = self._meter_name
+        return result
+
+    @staticmethod
+    def _local_day_start(dt: datetime, tz: ZoneInfo) -> datetime:
+        """Normalize to midnight in the account timezone."""
+        if dt.tzinfo is None:
+            local = dt.replace(tzinfo=tz)
+        else:
+            local = dt.astimezone(tz)
+        return local.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _build_tsm_form(
         self,

@@ -22,7 +22,11 @@ DEFAULT_TIMEOUT = 30  # seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 SESSION_TIMEOUT = 1500  # 25 minutes - force a fresh login periodically
-HISTORICAL_IMPORT_DAYS = 90  # number of days for initial import
+HISTORICAL_IMPORT_DAYS = 90  # calendar days of hourly data on first statistics import
+# Tyler returns one day per hourly request; re-fetch recent days each poll for backfill.
+INCREMENTAL_HOURLY_DAYS = 14
+# Pause between per-day hourly requests during bulk import (seconds).
+TSM_DAY_FETCH_DELAY = 0.2
 
 # Tyler Smart Meters JWT lifetime is ~30 minutes; refresh well before exp.
 JWT_REFRESH_MARGIN = 120  # seconds

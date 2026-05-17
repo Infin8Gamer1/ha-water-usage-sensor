@@ -6,6 +6,7 @@ import json
 import time
 from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -443,6 +444,43 @@ def test_parse_tsm_html_extracts_meter_status():
     assert reported.tzinfo is not None
     assert reported.strftime("%m/%d/%Y %I:%M %p") == "05/16/2026 12:00 AM"
     assert result[METER_REGISTER_READ_KEY] == pytest.approx(163776.70)
+
+
+@pytest.mark.asyncio
+async def test_async_get_hourly_usage_range_merges_days():
+    """Each day in the range triggers a separate hourly TSM request."""
+    api = _make_api()
+    api._authenticated = True
+    api._jwt = _make_jwt(int(time.time()) + 1800)
+    api._jwt_exp = int(time.time()) + 1800
+    api._meter_name = "MIU 1"
+    api._monthly_bills_json = json.dumps(
+        [
+            {
+                "Month": 5,
+                "Year": 2026,
+                "Amount": 1,
+                "StartDate": "2026-03-29T00:00:00",
+                "EndDate": "2026-04-29T00:00:00",
+                "TotalServiceCharge": 1.0,
+            }
+        ]
+    )
+
+    call_days: list[str] = []
+
+    async def fake_get_usage(aggregation, start_datetime, end_datetime=None):
+        call_days.append(start_datetime.strftime("%Y-%m-%d"))
+        return api._parse_tsm_html(TSM_HOURLY_HTML)
+
+    with patch.object(api, "async_get_usage", side_effect=fake_get_usage):
+        tz = ZoneInfo("America/Chicago")
+        start = datetime(2026, 5, 14, tzinfo=tz)
+        end = datetime(2026, 5, 16, tzinfo=tz)
+        result = await api.async_get_hourly_usage_range(start, end)
+
+    assert call_days == ["2026-05-14", "2026-05-15", "2026-05-16"]
+    assert len(result["USAGE"]) == 3 * 3  # 3 readings per day × 3 days
 
 
 def test_parse_tsm_html_meter_status_optional():

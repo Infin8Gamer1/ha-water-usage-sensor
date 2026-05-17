@@ -52,6 +52,7 @@ from .const import (
     ATTR_LAST_READING_TIME,
     DOMAIN,
     HISTORICAL_IMPORT_DAYS,
+    INCREMENTAL_HOURLY_DAYS,
     METER_LAST_REPORTED_KEY,
     METER_NAME,
     METER_REGISTER_READ_KEY,
@@ -122,14 +123,13 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
             for aggregation in (Aggregation.HOURLY, Aggregation.DAILY):
                 await self._insert_statistics(aggregation)
 
-            # Use a short daily window to populate the live sensor state.
-            start_datetime = datetime.now().replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) - timedelta(days=7)
-
+            # Daily chart returns the current billing cycle in one request.
+            tz = ZoneInfo(self.api.timezone)
+            now_local = datetime.now(tz)
             data = await self.api.async_get_usage(
                 aggregation=Aggregation.DAILY,
-                start_datetime=start_datetime,
+                start_datetime=now_local,
+                end_datetime=now_local,
             )
 
             record = self._build_coordinator_record(data)
@@ -141,8 +141,8 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                     self.account_id,
                 )
                 record[WATER_SENSOR_KEY] = 0
-                record[ATTR_LAST_READING_TIME] = start_datetime.replace(
-                    tzinfo=ZoneInfo(self.api.timezone)
+                record[ATTR_LAST_READING_TIME] = now_local.replace(
+                    hour=0, minute=0, second=0, microsecond=0
                 )
                 return {self.account_id: record}
 
@@ -217,37 +217,54 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
         )
         _LOGGER.debug("last_stat for %s: %s", aggregation.label, last_stat)
 
+        tz = ZoneInfo(self.api.timezone)
+        now_local = datetime.now(tz)
+
         if not last_stat:
-            _LOGGER.debug(
-                "Updating %s statistic for the first time", aggregation.label
+            _LOGGER.info(
+                "Importing %s statistics for the first time (%s days)",
+                aggregation.label,
+                HISTORICAL_IMPORT_DAYS
+                if aggregation == Aggregation.HOURLY
+                else "current billing cycle",
             )
             consumption_sum = 0.0
             last_stats_time: Optional[float] = None
 
-            start_datetime = datetime.now().replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) - timedelta(days=HISTORICAL_IMPORT_DAYS)
-
-            usage_data = await self.api.async_get_usage(
-                aggregation=aggregation, start_datetime=start_datetime
-            )
+            if aggregation == Aggregation.HOURLY:
+                range_start = now_local - timedelta(days=HISTORICAL_IMPORT_DAYS)
+                usage_data = await self.api.async_get_hourly_usage_range(
+                    range_start, now_local
+                )
+            else:
+                usage_data = await self.api.async_get_usage(
+                    aggregation=aggregation,
+                    start_datetime=now_local,
+                    end_datetime=now_local,
+                )
         else:
-            start_datetime = datetime.fromtimestamp(
-                last_stat[consumption_statistic_id][0]["start"], tz=timezone.utc
-            )
-            # Always backdate to avoid gaps if the portal back-fills late.
-            start_datetime = start_datetime - timedelta(days=2)
-
-            _LOGGER.debug(
-                "Fetching %s statistics from %s", aggregation.label, start_datetime
-            )
-            usage_data = await self.api.async_get_usage(
-                aggregation=aggregation, start_datetime=start_datetime
-            )
+            if aggregation == Aggregation.HOURLY:
+                range_start = now_local - timedelta(days=INCREMENTAL_HOURLY_DAYS)
+                _LOGGER.debug(
+                    "Refreshing hourly statistics from %s", range_start.date()
+                )
+                usage_data = await self.api.async_get_hourly_usage_range(
+                    range_start, now_local
+                )
+            else:
+                range_start = datetime.fromtimestamp(
+                    last_stat[consumption_statistic_id][0]["start"],
+                    tz=timezone.utc,
+                ).astimezone(tz) - timedelta(days=2)
+                usage_data = await self.api.async_get_usage(
+                    aggregation=aggregation,
+                    start_datetime=range_start,
+                    end_datetime=now_local,
+                )
 
             if not usage_data or not usage_data.get("USAGE"):
                 _LOGGER.warning(
-                    "No data received from water API to populate historical %s stats",
+                    "No data received from water API to populate %s stats",
                     aggregation.label,
                 )
                 return
@@ -272,7 +289,7 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                     None,
                     {"sum"},
                 )
-                if stats:
+                if stats and stats.get(consumption_statistic_id):
                     break
                 if end:
                     _LOGGER.debug(
@@ -280,23 +297,27 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                         start,
                     )
 
-            assert stats
-
             def _safe_get_sum(records: list[Any]) -> float:
                 if records and "sum" in records[0]:
                     return float(records[0]["sum"])
                 return 0.0
 
-            consumption_sum = _safe_get_sum(
-                stats.get(consumption_statistic_id, [])
-            )
-            last_stats_time = stats[consumption_statistic_id][0]["start"]
-
-            _LOGGER.info(
-                "Updating %s statistics since %s",
-                aggregation.label,
-                last_stats_time,
-            )
+            if stats and stats.get(consumption_statistic_id):
+                consumption_sum = _safe_get_sum(stats[consumption_statistic_id])
+                last_stats_time = stats[consumption_statistic_id][0]["start"]
+                _LOGGER.info(
+                    "Updating %s statistics since %s",
+                    aggregation.label,
+                    last_stats_time,
+                )
+            else:
+                _LOGGER.warning(
+                    "No prior %s statistic at %s; rebuilding sum from zero",
+                    aggregation.label,
+                    start,
+                )
+                consumption_sum = 0.0
+                last_stats_time = None
 
         consumption_statistics: list[StatisticData] = []
         for reading in usage_data.get("USAGE", []):
@@ -320,9 +341,18 @@ class WaterUsageCoordinator(DataUpdateCoordinator):
                 f"{self.account_id} - {meter_name}"
             )
 
+        if not consumption_statistics:
+            _LOGGER.warning(
+                "No %s statistics to import for %s",
+                aggregation.label,
+                consumption_statistic_id,
+            )
+            return
+
         _LOGGER.info(
-            "Adding %s statistics for %s",
+            "Adding %s %s statistics for %s",
             len(consumption_statistics),
+            aggregation.label,
             consumption_statistic_id,
         )
         async_add_external_statistics(

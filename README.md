@@ -102,6 +102,12 @@ Statistic IDs use a slug derived from your account ID (hyphens become underscore
 | Hourly (Energy dashboard) | `municipal_water_usage:water_usage_14_6402_01` |
 | Daily | `municipal_water_usage:water_usage_daily_14_6402_01` |
 
+### First import timing
+
+Tyler Smart Meters returns **one day of hourly data per API request**. On first setup the integration loops over the last **90 calendar days** (about 90 requests). That can take **several minutes**; watch **Settings → System → Logs** for `Fetching hourly usage for YYYY-MM-DD` progress lines. The Energy dashboard stays empty until this finishes.
+
+Each later poll refreshes the last **14 days** of hourly data so late portal backfill is picked up.
+
 ## Configuration Options
 
 Default polling is every **6 hours**. Municipal portals typically post hourly usage with a delay of several hours; polling more often does not pull new data faster.
@@ -114,7 +120,7 @@ The portal (Municipal Online Payments) authenticates via a shared identity provi
 
 1. **Login** (`async_login`) — OpenID Connect against `account.municipalonlinepayments.com`, including the `signin-oidc` form_post callback (single- or double-quoted HTML attributes).
 2. **Chart context** (`async_get_chart_context`) — Loads the account consumption page and extracts a ~30-minute JWT, meter metadata, and billing history from the `charts.js` script tag.
-3. **Usage fetch** (`async_get_usage`) — POSTs the full chart view-state (JWT, interval, date window, billing cycles, meter info) to `https://www.tylersmartmeters.com/`. The HTML response includes `series0.push([...])` usage lines and the billing sidebar (“Meter last reported”, register read).
+3. **Usage fetch** (`async_get_usage` / `async_get_hourly_usage_range`) — POSTs the full chart view-state to `https://www.tylersmartmeters.com/`. Hourly mode returns one calendar day per request, so historical import loops day-by-day. The HTML response includes `series0.push([...])` usage lines and the billing sidebar (“Meter last reported”, register read).
 4. **Unit conversion** — chart values are HGAL; multiplied by 100 for gallons. Register read from the sidebar is already shown in gallons on the portal.
 
 JWTs refresh automatically; full re-login runs if the tenant session or chart context is rejected.
@@ -133,8 +139,10 @@ JWTs refresh automatically; full re-login runs if the tenant session or chart co
 
 **No data / empty Energy chart**
 
+- Wait for the **first hourly backfill** to finish (see [First import timing](#first-import-timing)); the chart only fills after ~90 daily requests complete
 - Confirm usage appears on the portal for the same account ID
 - Hourly data often lags by several hours
+- If you installed an older build that only imported a single day, remove the integration, clear the statistic under **Developer tools → Statistics**, then add the integration again
 - Check logs with debug logging enabled (below)
 
 **Account ID not found**
