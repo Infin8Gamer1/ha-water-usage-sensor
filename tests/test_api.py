@@ -317,6 +317,7 @@ async def test_async_get_chart_context_extracts_jwt_and_meter():
 
     mock_session = MagicMock()
     mock_session.get = MagicMock(return_value=_ctx(200, html))
+    mock_session.cookie_jar = _mock_cookie_jar(".AspNet.Cookies")
 
     with patch.object(MunicipalWaterAPI, "_get_session", return_value=mock_session):
         await api.async_get_chart_context()
@@ -339,6 +340,7 @@ async def test_async_get_chart_context_raises_when_token_missing():
     mock_session.get = MagicMock(
         return_value=_ctx(200, "<html><body>No charts here</body></html>")
     )
+    mock_session.cookie_jar = _mock_cookie_jar(".AspNet.Cookies")
 
     with patch.object(MunicipalWaterAPI, "_get_session", return_value=mock_session):
         with pytest.raises(WaterUsageDataError):

@@ -21,3 +21,7 @@ DevToolNotes/
 # Diagnostic HTML dumps produced by scripts/test_api_live.py
 .debug_*.html
 .debug_*.txt
+
+# Agent debug session logs (HA: custom_components/municipal_water_usage/debug-52d3b8.log)
+debug-52d3b8.log
+**/debug-52d3b8.log

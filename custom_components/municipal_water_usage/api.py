@@ -31,7 +31,9 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -61,6 +63,35 @@ from .exceptions import (
 from .utils import sanitize_host
 
 _LOGGER = logging.getLogger(__name__)
+
+# #region agent log
+_DEBUG_LOG_PATH = Path(__file__).resolve().parent / "debug-52d3b8.log"
+_DEBUG_SESSION_ID = "52d3b8"
+
+
+def _agent_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: Dict[str, Any],
+) -> None:
+    """Append one NDJSON debug line (no secrets)."""
+    try:
+        payload = {
+            "sessionId": _DEBUG_SESSION_ID,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(payload) + "\n")
+    except OSError:
+        pass
+
+
+# #endregion
 
 # Regexes used to scrape data from HTML responses.
 #
@@ -406,6 +437,53 @@ class MunicipalWaterAPI:
     # JWT + per-account metadata extraction
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _has_tenant_session(session: aiohttp.ClientSession) -> bool:
+        """True when the bastrop tenant cookie from OIDC form_post is present."""
+        return any(c.key == ".AspNet.Cookies" for c in session.cookie_jar)
+
+    @staticmethod
+    def _diagnose_consumption_html(html_body: str, final_url: str) -> Dict[str, Any]:
+        """Classify a consumption-page response without logging secrets."""
+        lower = html_body.lower()
+        url_lower = final_url.lower()
+        if "charts.js" in lower and "data-token" in lower:
+            page_type = "consumption"
+        elif "signin-oidc" in lower or "/connect/authorize" in url_lower:
+            page_type = "oidc_interstitial"
+        elif "/account/login" in url_lower or 'name="password"' in lower:
+            page_type = "login"
+        else:
+            page_type = "unknown"
+        return {
+            "page_type": page_type,
+            "has_charts_js": "charts.js" in lower,
+            "has_data_token": "data-token" in lower,
+            "final_url_host": urlparse(final_url).netloc,
+            "body_length": len(html_body),
+        }
+
+    async def _fetch_consumption_page(
+        self, session: aiohttp.ClientSession
+    ) -> Tuple[str, str, int]:
+        """GET the account consumption page; return ``(html, final_url, status)``."""
+        url = (
+            f"https://{self.host}/bastroptx/utilities/accounts/consumption/"
+            f"{self.account_id}"
+        )
+        async with session.get(url, allow_redirects=True) as response:
+            html_body = await response.text()
+            if response.status == 401 or response.status == 403:
+                raise WaterUsageAuthenticationError(
+                    f"Consumption page returned HTTP {response.status}; "
+                    "session may have expired"
+                )
+            if response.status != 200:
+                raise WaterUsageConnectionError(
+                    f"Consumption page returned HTTP {response.status}"
+                )
+            return html_body, str(response.url), response.status
+
     async def async_get_chart_context(self) -> None:
         """Fetch the consumption page and cache JWT + meter metadata.
 
@@ -419,48 +497,103 @@ class MunicipalWaterAPI:
                     data-account-start-date="6/14/2024 12:00:00 AM"
                     ...>
         """
-        if not self._authenticated:
-            await self.async_login()
-
         session = await self._get_session()
-        url = (
-            f"https://{self.host}/bastroptx/utilities/accounts/consumption/"
-            f"{self.account_id}"
+        cookie_names = sorted({c.key for c in session.cookie_jar})
+        # #region agent log
+        _agent_log(
+            "A",
+            "api.py:async_get_chart_context:entry",
+            "chart context entry",
+            {
+                "authenticated": self._authenticated,
+                "has_tenant_cookie": self._has_tenant_session(session),
+                "cookie_count": len(cookie_names),
+            },
         )
+        # #endregion
 
-        async with session.get(url, allow_redirects=True) as response:
-            html_body = await response.text()
-            if response.status == 401 or response.status == 403:
-                raise WaterUsageAuthenticationError(
-                    f"Consumption page returned HTTP {response.status}; "
-                    "session may have expired"
-                )
-            if response.status != 200:
-                raise WaterUsageConnectionError(
-                    f"Consumption page returned HTTP {response.status}"
-                )
+        if not self._authenticated or not self._has_tenant_session(session):
+            # IDP cookies may still be present while the tenant cookie expired;
+            # a full session reset avoids landing on the wrong login HTML.
+            await self._refresh_authentication()
+            session = await self._get_session()
 
-        attrs = self._extract_charts_data_attrs(html_body)
-        token = attrs.get("token")
-        if not token:
-            raise WaterUsageDataError(
-                "Consumption page did not include a TSM token — "
-                "is the account number correct?"
+        for attempt in (1, 2):
+            html_body, final_url, status = await self._fetch_consumption_page(session)
+            diagnosis = self._diagnose_consumption_html(html_body, final_url)
+            # #region agent log
+            _agent_log(
+                "B" if attempt == 1 else "C",
+                "api.py:async_get_chart_context:fetch",
+                "consumption page fetched",
+                {
+                    "attempt": attempt,
+                    "status": status,
+                    "has_tenant_cookie": self._has_tenant_session(session),
+                    **diagnosis,
+                },
             )
+            # #endregion
 
-        self._jwt = token
-        self._jwt_exp = self._decode_jwt_exp(token)
-        self._meter_info_json = attrs.get("tsm-smartmeter-info")
-        self._chart_info_json = attrs.get("tsm-chart-info")
-        self._monthly_bills_json = attrs.get("monthly-bills")
-        self._account_start_date = attrs.get("account-start-date")
-        self._meter_name = self._extract_meter_name(self._meter_info_json)
+            try:
+                attrs = self._extract_charts_data_attrs(html_body)
+            except WaterUsageDataError:
+                if attempt == 2:
+                    raise WaterUsageDataError(
+                        "Could not locate the Tyler Smart Meters chart loader "
+                        f"in the page (page_type={diagnosis['page_type']}, "
+                        f"url_host={diagnosis['final_url_host']})"
+                    ) from None
+                _LOGGER.warning(
+                    "Chart loader missing (page_type=%s); re-authenticating",
+                    diagnosis["page_type"],
+                )
+                # #region agent log
+                _agent_log(
+                    "A",
+                    "api.py:async_get_chart_context:retry",
+                    "missing chart loader, forcing re-login",
+                    diagnosis,
+                )
+                # #endregion
+                await self._refresh_authentication()
+                session = await self._get_session()
+                continue
 
-        _LOGGER.debug(
-            "Cached TSM context: meter=%s, jwt_exp=%s",
-            self._meter_name,
-            self._jwt_exp,
-        )
+            token = attrs.get("token")
+            if not token:
+                raise WaterUsageDataError(
+                    "Consumption page did not include a TSM token — "
+                    "is the account number correct?"
+                )
+
+            self._jwt = token
+            self._jwt_exp = self._decode_jwt_exp(token)
+            self._meter_info_json = attrs.get("tsm-smartmeter-info")
+            self._chart_info_json = attrs.get("tsm-chart-info")
+            self._monthly_bills_json = attrs.get("monthly-bills")
+            self._account_start_date = attrs.get("account-start-date")
+            self._meter_name = self._extract_meter_name(self._meter_info_json)
+
+            # #region agent log
+            _agent_log(
+                "D",
+                "api.py:async_get_chart_context:success",
+                "chart context cached",
+                {
+                    "attempt": attempt,
+                    "jwt_exp": self._jwt_exp,
+                    "meter_name": self._meter_name,
+                },
+            )
+            # #endregion
+
+            _LOGGER.debug(
+                "Cached TSM context: meter=%s, jwt_exp=%s",
+                self._meter_name,
+                self._jwt_exp,
+            )
+            return
 
     def _extract_charts_data_attrs(self, html_body: str) -> Dict[str, str]:
         """Pull every ``data-*`` attribute from the charts.js ``<script>`` tag."""
