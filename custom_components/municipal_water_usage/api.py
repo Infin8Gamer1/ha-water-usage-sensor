@@ -101,6 +101,9 @@ _DATA_ATTR_RE = re.compile(
 _SERIES_PUSH_RE = re.compile(
     r"series0\.push\(\['([^']+)',\s*(-?[\d.]+)\]\);"
 )
+# TSM marks hours still awaiting meter data with missingReads.push(index)
+# immediately before a placeholder series0 value (typically 0.1 HGAL).
+_MISSING_READS_PUSH_RE = re.compile(r"missingReads\.push\((\d+)\)")
 # Billing sidebar on TSM chart pages (forge UI).
 _METER_LAST_REPORTED_RE = re.compile(
     r"Meter last reported.*?(\d{1,2}/\d{1,2}/\d{4}\s*-\s*\d{1,2}:\d{2}\s*(?:AM|PM))",
@@ -1012,11 +1015,22 @@ class MunicipalWaterAPI:
         Values are HGAL (hundreds of gallons) per the portal's own scaling
         notice; we convert to gallons here so all downstream code stays in
         the integration's declared unit.
+
+        Hours listed in ``missingReads`` are skipped — TSM injects a
+        placeholder bar (usually 0.1 HGAL) for intervals whose data has not
+        arrived yet.
         """
         tz = ZoneInfo(self.timezone)
+        missing_indices = {
+            int(match.group(1))
+            for match in _MISSING_READS_PUSH_RE.finditer(html_body)
+        }
         readings: List[Dict[str, Any]] = []
 
-        for match in _SERIES_PUSH_RE.finditer(html_body):
+        for point_index, match in enumerate(_SERIES_PUSH_RE.finditer(html_body)):
+            if point_index in missing_indices:
+                continue
+
             ts_str = match.group(1)
             value_str = match.group(2)
             try:

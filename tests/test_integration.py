@@ -140,6 +140,27 @@ def test_parse_tsm_html_no_data(api_instance):
     assert result["USAGE"] == []
 
 
+def test_parse_tsm_html_skips_missing_reads_placeholder(api_instance):
+    """TSM placeholder bars for unreceived data must not become usage."""
+    html = """
+    <script>
+    var missingReads = [];
+    series0.push(['05/21/2026 00:00:00', 0]);
+    reads0.push(['05/21/2026 00:00:00', [0, 0]]);
+    missingReads.push(1);series0.push(['05/21/2026 01:00:00', 0.1]);
+    reads0.push(['05/21/2026 01:00:00', [0, 0]]);
+    missingReads.push(2);series0.push(['05/21/2026 02:00:00', 0.1]);
+    reads0.push(['05/21/2026 02:00:00', [0, 0]]);
+    </script>
+    """
+
+    result = api_instance._parse_tsm_html(html)
+
+    assert len(result["USAGE"]) == 1
+    assert result["USAGE"][0]["reading_time"].hour == 0
+    assert result["USAGE"][0]["consumption"] == 0.0
+
+
 @pytest.mark.asyncio
 async def test_async_setup_entry_success(mock_hass, mock_config_entry):
     """Setup creates an API client, logs in, and stores the coordinator."""
