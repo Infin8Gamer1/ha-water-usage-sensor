@@ -891,15 +891,13 @@ class MunicipalWaterAPI:
             now = datetime.now()
             return now.month, now.year, now.replace(day=1), now
 
-        # The next cycle is approximately one calendar month long. Calendar
-        # arithmetic is "easiest" via adding 31 days and snapping to the same
-        # day-of-month if possible; for our purposes (just giving the server
-        # a plausible end date) the captured "end-of-month-ish" value works.
+        # Approximate one billing month ahead for TSM view-state. The portal
+        # only needs a plausible in-progress window; it must include "today" so
+        # per-day hourly requests for recent calendar days are accepted.
         cycle_end = cycle_start + timedelta(days=31)
-        try:
-            cycle_end = cycle_end.replace(day=min(cycle_start.day, 28))
-        except ValueError:
-            pass
+        now = datetime.now()
+        if cycle_end < now:
+            cycle_end = now
 
         cycle_month, cycle_year = _shift_month(
             most_recent.get("Month", cycle_start.month),
